@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Chillax Drink 蕎淶清飲 - 智慧訂單處理系統</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap');
+        body { 
+            font-family: 'Noto Sans TC', sans-serif; 
+            -webkit-tap-highlight-color: transparent;
+            background-color: #f8fafc;
+        }
+        .animate-in { animation: fadeIn 0.3s ease-out forwards; }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .no-select { -webkit-user-select: none; user-select: none; }
+        .tab-shadow { box-shadow: 0 4px 20px -5px rgba(5, 150, 105, 0.2); }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script>
+        const e = React.createElement;
+        const { useState, useEffect, useMemo } = React;
+
+        const TEA_ITEMS = [
+            { id: 'sj', name: '四季春茶', price: 245 },
+            { id: 'rh', name: '盧哈娜紅茶', price: 160 },
+            { id: 'ls', name: '蘭香綠茶', price: 160 },
+            { id: 'jx', name: '金萱青茶', price: 250 },
+            { id: 'hjx', name: '重金萱', price: 250 },
+            { id: 'old', name: '古早味紅茶', price: 100 }
+        ];
+
+        const LEMON_ITEMS = [
+            { id: 'w_sug', name: '白甘蔗汁', price: 60 },
+            { id: 'lem', name: '檸檬汁', price: 130 },
+            { id: 'ora', name: '柳丁汁', price: 80 },
+            { id: 'pas', name: '百香果汁', price: 130 }
+        ];
+
+        function App() {
+            const [activeTab, setActiveTab] = useState('tea');
+            const [history, setHistory] = useState([]);
+            const [teaQtys, setTeaQtys] = useState({ sj: 0, rh: 0, ls: 0, jx: 0, hjx: 0, old: 0 });
+            const [zhengQty, setZhengQty] = useState(0);
+            const [lemonQtys, setLemonQtys] = useState({ w_sug: 0, lem: 0, ora: 0, pas: 0 });
+            const [isLemonRestockOnly, setIsLemonRestockOnly] = useState(false);
+            const [toast, setToast] = useState('');
+
+            useEffect(() => {
+                const saved = localStorage.getItem('chillax_order_history_v2');
+                if (saved) setHistory(JSON.parse(saved));
+            }, []);
+
+            const showToast = (msg) => {
+                setToast(msg);
+                setTimeout(() => setToast(''), 3000);
+            };
+
+            const handleSend = (vendor) => {
+                let message = `【訂單：Chillax Drink 蕎淶清飲】\n日期：${new Date().toLocaleDateString()}\n--------------------------\n`;
+                let itemsToSave = [];
+                let finalTotal = 0;
+                let details = {};
+                let note = '';
+
+                if (vendor === 'tea') {
+                    const totalQty = Object.values(teaQtys).reduce((a, b) => a + b, 0);
+                    if (totalQty === 0) return;
+
+                    TEA_ITEMS.forEach(i => {
+                        if (teaQtys[i.id] > 0) {
+                            message += `● ${i.name}：${teaQtys[i.id]} 斤\n`;
+                            itemsToSave.push({ id: i.id, name: i.name, qty: teaQtys[i.id], price: i.price });
+                        }
+                    });
+                    
+                    const subtotal = TEA_ITEMS.reduce((sum, item) => sum + (teaQtys[item.id] * item.price), 0);
+                    const discount = totalQty >= 60 ? totalQty * 10 : 0;
+                    const tax = Math.round((subtotal - discount) * 0.05);
+                    const shipping = (totalQty < 30 && totalQty > 0) ? 150 : 0;
+                    finalTotal = subtotal - discount + tax + shipping;
+                    
+                    details = { subtotal, discount, tax, shipping, totalQty };
+                    message += `--------------------------\n小計：NT$ ${subtotal.toLocaleString()}\n`;
+                    if(discount > 0) message += `大宗折扣：-NT$ ${discount.toLocaleString()}\n`;
+                    message += `營業稅(5%)：+NT$ ${tax.toLocaleString()}\n`;
+                    if(shipping > 0) message += `運費：+NT$ ${shipping.toLocaleString()}\n`;
+                    message += `總計：NT$ ${finalTotal.toLocaleString()}\n付款：匯款`;
+
+                } else if (vendor === 'zheng') {
+                    if (zhengQty === 0) return;
+                    message += `● 芒果漿：${zhengQty} 瓶\n`;
+                    itemsToSave.push({ id: 'mango', name: '芒果漿', qty: zhengQty, price: 170 });
+                    
+                    const subtotal = zhengQty * 170;
+                    let shipping = zhengQty < 10 ? 200 : (zhengQty < 20 ? 150 : 0);
+                    finalTotal = subtotal + shipping;
+                    details = { subtotal, shipping, totalQty: zhengQty };
+                    
+                    message += `--------------------------\n小計：NT$ ${subtotal.toLocaleString()}\n運費：+NT$ ${shipping.toLocaleString()}\n總計：NT$ ${finalTotal.toLocaleString()}\n付款：貨到付款`;
+
+                } else if (vendor === 'lemon') {
+                    const totalQty = Object.values(lemonQtys).reduce((a, b) => a + b, 0);
+                    if (totalQty === 0) return;
+
+                    LEMON_ITEMS.forEach(i => {
+                        if (lemonQtys[i.id] > 0) {
+                            message += `● ${i.name}：${lemonQtys[i.id]} 瓶\n`;
+                            itemsToSave.push({ id: i.id, name: i.name, qty: lemonQtys[i.id], price: i.price });
+                        }
+                    });
+                    
+                    const subtotal = LEMON_ITEMS.reduce((sum, item) => sum + (lemonQtys[item.id] * item.price), 0);
+                    const boxes = Math.ceil(totalQty / 24);
+                    const shipping = totalQty >= 24 ? boxes * 100 : 100;
+                    const fee = 30; // 貨到付款手續費
+                    finalTotal = subtotal + shipping + fee;
+                    
+                    if (isLemonRestockOnly) { note = '單純補貨'; message += `(備註：單純補貨)\n`; }
+                    details = { subtotal, shipping, fee, totalQty };
+                    
+                    message += `--------------------------\n小計：NT$ ${subtotal.toLocaleString()}\n運費：+NT$ ${shipping.toLocaleString()}\n手續費：+NT$ ${fee}\n總計：NT$ ${finalTotal.toLocaleString()}\n付款：貨到付款`;
+                }
+
+                const newHistory = [{ 
+                    id: Date.now(), 
+                    vendor: vendor === 'tea' ? '大武茶葉' : '凍果汁廠商', 
+                    vendorKey: vendor,
+                    items: itemsToSave, 
+                    totalAmount: finalTotal, 
+                    details,
+                    note, 
+                    timestamp: new Date().toISOString() 
+                }, ...history];
+                
+                setHistory(newHistory);
+                localStorage.setItem('chillax_order_history_v2', JSON.stringify(newHistory));
+
+                const el = document.createElement('textarea');
+                el.value = message;
+                document.body.appendChild(el);
+                el.select();
+                document.execCommand('copy');
+                document.body.removeChild(el);
+
+                showToast("訂單已複製並存入分析系統！");
+                setTimeout(() => {
+                    window.open(`https://line.me/R/msg/text/?${encodeURIComponent(message)}`, '_blank');
+                }, 500);
+            };
+
+            // 數據分析邏輯
+            const analytics = useMemo(() => {
+                const now = new Date();
+                const currentMonth = now.getMonth();
+                const currentYear = now.getFullYear();
+                
+                const monthTotal = history.reduce((sum, order) => {
+                    const d = new Date(order.timestamp);
+                    if(d.getMonth() === currentMonth && d.getFullYear() === currentYear) {
+                        return sum + order.totalAmount;
+                    }
+                    return sum;
+                }, 0);
+
+                // 計算品項權重 (過去30天)
+                const itemCounts = {};
+                const thirtyDaysAgo = new Date(now.setDate(now.getDate() - 30));
+                history.forEach(order => {
+                    if(new Date(order.timestamp) > thirtyDaysAgo) {
+                        order.items.forEach(i => {
+                            itemCounts[i.name] = (itemCounts[i.name] || 0) + i.qty;
+                        });
+                    }
+                });
+
+                const recommendations = Object.entries(itemCounts)
+                    .sort((a, b) => b[1] - a[1])
+                    .slice(0, 3);
+
+                return { monthTotal, recommendations };
+            }, [history]);
+
+            const renderTeaTab = () => {
+                const totalQty = Object.values(teaQtys).reduce((a, b) => a + b, 0);
+                const subtotal = TEA_ITEMS.reduce((sum, item) => sum + (teaQtys[item.id] * item.price), 0);
+                const discount = totalQty >= 60 ? totalQty * 10 : 0;
+                const tax = Math.round((subtotal - discount) * 0.05);
+                const shipping = (totalQty < 30 && totalQty > 0) ? 150 : 0;
+                const final = subtotal - discount + tax + shipping;
+
+                return e('section', { className: 'animate-in space-y-3' }, 
+                    TEA_ITEMS.map(item => e('div', { key: item.id, className: 'bg-white p-4 rounded-3xl shadow-sm flex justify-between items-center border border-gray-100' },
+                        e('div', null, 
+                            e('h4', { className: 'font-bold text-gray-700' }, item.name),
+                            e('p', { className: 'text-xs text-emerald-600 font-bold' }, `NT$ ${item.price} / 斤`)
+                        ),
+                        e('div', { className: 'flex items-center gap-3 bg-gray-50 p-1 rounded-2xl no-select' },
+                            e('button', { onClick: () => setTeaQtys(p => ({...p, [item.id]: Math.max(0, p[item.id]-1)})), className: 'w-10 h-10 bg-white rounded-full shadow-sm flex items-center justify-center font-bold' }, '-'),
+                            e('span', { className: 'w-6 text-center font-bold' }, teaQtys[item.id]),
+                            e('button', { onClick: () => setTeaQtys(p => ({...p, [item.id]: p[item.id]+1})), className: 'w-10 h-10 bg-white rounded-full shadow-sm flex items-center justify-center text-emerald-600 font-bold' }, '+')
+                        )
+                    )),
+                    e('div', { className: 'mt-6 bg-white p-6 rounded-[32px] shadow-lg border-2 border-emerald-50 mb-10' },
+                        e('h3', { className: 'font-black mb-4 text-emerald-800 flex justify-between' }, e('span', null, '大武茶葉 結帳詳情'), e('span', {className:'text-xs font-medium'}, `共 ${totalQty} 斤`)),
+                        e('div', { className: 'space-y-3 text-sm' },
+                            e('div', { className: 'flex justify-between text-gray-400' }, e('span', null, '原始小計'), e('span', null, `NT$ ${subtotal.toLocaleString()}`)),
+                            discount > 0 && e('div', { className: 'flex justify-between text-red-500 font-bold bg-red-50 p-2 rounded-xl' }, e('span', null, '大宗優惠 (滿60斤 -$10/斤)'), e('span', null, `- NT$ ${discount.toLocaleString()}`)),
+                            e('div', { className: 'flex justify-between text-gray-500' }, e('span', null, '應稅額小計'), e('span', null, `NT$ ${(subtotal - discount).toLocaleString()}`)),
+                            e('div', { className: 'flex justify-between text-gray-500' }, e('span', null, '營業稅 (5%)'), e('span', null, `+ NT$ ${tax.toLocaleString()}`)),
+                            e('div', { className: 'flex justify-between ' + (shipping > 0 ? 'text-orange-600 font-bold' : 'text-gray-300') }, e('span', null, '運費 (未滿30斤)'), e('span', null, shipping > 0 ? `+ NT$ ${shipping}` : '免運')),
+                            e('div', { className: 'border-t border-dashed pt-4 flex justify-between items-center' },
+                                e('span', { className: 'font-bold' }, '預計匯款總額'),
+                                e('span', { className: 'text-2xl font-black text-emerald-700' }, `NT$ ${final.toLocaleString()}`)
+                            )
+                        ),
+                        e('button', { onClick: () => handleSend('tea'), className: 'w-full mt-6 bg-[#06C755] text-white py-4 rounded-2xl font-bold shadow-md active:scale-95 transition-transform' }, '複製訂單並開啟 LINE')
+                    )
+                );
+            };
+
+            const renderJuiceTab = () => {
+                const zTotal = zhengQty * 170;
+                let zShipping = zhengQty > 0 && zhengQty < 10 ? 200 : (zhengQty >= 10 && zhengQty < 20 ? 150 : 0);
+                const zFinal = zTotal + zShipping;
+
+                const lQty = Object.values(lemonQtys).reduce((a, b) => a + b, 0);
+                const lSub = LEMON_ITEMS.reduce((sum, i) => sum + (lemonQtys[i.id] * i.price), 0);
+                const lShip = lQty > 0 ? (lQty >= 24 ? Math.ceil(lQty/24) * 100 : 100) : 0;
+                const lFee = lQty > 0 ? 30 : 0;
+                const lFinal = lSub + lShip + lFee;
+
+                return e('section', { className: 'animate-in space-y-6 pb-10' },
+                    e('div', { className: 'bg-orange-50 p-6 rounded-[32px] border border-orange-100 shadow-sm' },
+                        e('h3', { className: 'font-black text-orange-800 mb-4' }, '鉦旺樂 - 芒果漿'),
+                        e('div', { className: 'bg-white p-4 rounded-3xl flex justify-between items-center shadow-sm mb-3' },
+                            e('div', null, e('span', { className: 'font-bold block' }, '芒果漿'), e('span', { className: 'text-xs text-orange-600 font-bold' }, 'NT$ 170 / 瓶')),
+                            e('div', { className: 'flex items-center gap-4 bg-orange-50/50 p-1 rounded-2xl no-select' },
+                                e('button', { onClick: () => setZhengQty(Math.max(0, zhengQty-1)), className: 'w-10 h-10 bg-white rounded-full flex items-center justify-center font-bold shadow-sm' }, '-'),
+                                e('span', { className: 'w-6 text-center font-bold text-lg' }, zhengQty),
+                                e('button', { onClick: () => setZhengQty(zhengQty+1), className: 'w-10 h-10 bg-white rounded-full flex items-center justify-center font-bold text-orange-600 shadow-sm' }, '+')
+                            )
+                        ),
+                        zhengQty > 0 && e('div', { className: 'px-2 py-1 space-y-1 text-xs text-orange-700/70 mb-3' },
+                            e('div', { className: 'flex justify-between' }, e('span', null, '小計'), e('span', null, `NT$ ${zTotal.toLocaleString()}`)),
+                            e('div', { className: 'flex justify-between font-bold' }, e('span', null, '運費詳情'), e('span', null, `+ NT$ ${zShipping}`))
+                        ),
+                        e('button', { onClick: () => handleSend('zheng'), className: 'w-full bg-orange-600 text-white py-3 rounded-2xl font-bold shadow-sm' }, `傳送鉦旺樂 NT$ ${zFinal.toLocaleString()}`)
+                    ),
+                    e('div', { className: 'bg-yellow-50 p-6 rounded-[32px] border border-yellow-100 shadow-sm' },
+                        e('div', { className: 'flex justify-between items-center mb-4' },
+                            e('h3', { className: 'font-black text-yellow-800' }, '檸檬工廠'),
+                            e('label', { className: 'flex items-center gap-2 text-xs font-bold bg-white px-3 py-1.5 rounded-full shadow-sm' },
+                                e('input', { type: 'checkbox', checked: isLemonRestockOnly, onChange: (e) => setIsLemonRestockOnly(e.target.checked), className: 'w-4 h-4 accent-yellow-600' }),
+                                '單純補貨'
+                            )
+                        ),
+                        e('div', { className: 'space-y-2 mb-4' },
+                            LEMON_ITEMS.map(i => e('div', { key: i.id, className: 'bg-white p-4 rounded-2xl flex justify-between items-center shadow-sm border border-yellow-50' },
+                                e('div', null, e('span', { className: 'font-bold block text-sm text-gray-700' }, i.name), e('span', { className: 'text-[10px] text-yellow-700 font-bold' }, `NT$ ${i.price}`)),
+                                e('div', { className: 'flex items-center gap-3 bg-yellow-50/50 p-1 rounded-xl no-select' },
+                                    e('button', { onClick: () => setLemonQtys(p => ({...p, [i.id]: Math.max(0, p[i.id]-1)})), className: 'w-8 h-8 bg-white rounded-full flex items-center justify-center font-bold' }, '-'),
+                                    e('span', { className: 'w-4 text-center text-xs font-bold' }, lemonQtys[i.id]),
+                                    e('button', { onClick: () => setLemonQtys(p => ({...p, [i.id]: p[i.id]+1})), className: 'w-8 h-8 bg-white rounded-full flex items-center justify-center font-bold text-yellow-600' }, '+')
+                                )
+                            ))
+                        ),
+                        lQty > 0 && e('div', { className: 'px-4 py-3 bg-white/50 rounded-2xl mb-4 text-xs space-y-1 text-yellow-800' },
+                            e('div', { className: 'flex justify-between' }, e('span', null, '產品小計'), e('span', null, `NT$ ${lSub.toLocaleString()}`)),
+                            e('div', { className: 'flex justify-between' }, e('span', null, '運費 (每24瓶/箱)'), e('span', null, `+ NT$ ${lShip}`)),
+                            e('div', { className: 'flex justify-between' }, e('span', null, '貨到付款手續費'), e('span', null, `+ NT$ ${lFee}`))
+                        ),
+                        e('button', { 
+                            disabled: lQty === 0 || (!isLemonRestockOnly && lQty < 24),
+                            onClick: () => handleSend('lemon'), 
+                            className: `w-full py-4 rounded-2xl font-bold shadow-md transition-all ${(isLemonRestockOnly || lQty >= 24) ? 'bg-yellow-500 text-white' : 'bg-gray-300 text-gray-500'}`
+                        }, `傳送檸檬工廠 NT$ ${lFinal.toLocaleString()}`),
+                        !isLemonRestockOnly && lQty > 0 && lQty < 24 && e('p', { className: 'text-[10px] text-red-500 text-center mt-2 font-bold' }, '※ 未滿 24 瓶請勾選「單純補貨」')
+                    )
+                );
+            };
+
+            const renderHistoryTab = () => {
+                return e('section', { className: 'animate-in space-y-6 pb-20' },
+                    // 智慧分析卡片
+                    e('div', { className: 'bg-emerald-900 text-white p-6 rounded-[2.5rem] shadow-xl relative overflow-hidden' },
+                        e('div', { className: 'relative z-10' },
+                            e('h3', { className: 'text-xs font-bold text-emerald-300 uppercase tracking-widest mb-1' }, '本月支出預估'),
+                            e('div', { className: 'text-3xl font-black mb-4' }, `NT$ ${analytics.monthTotal.toLocaleString()}`),
+                            e('div', { className: 'h-px bg-emerald-700 w-full mb-4' }),
+                            e('h3', { className: 'text-xs font-bold text-emerald-300 mb-2' }, '💡 補貨建議 (近30天熱門)'),
+                            e('div', { className: 'flex gap-2' },
+                                analytics.recommendations.length > 0 ? 
+                                analytics.recommendations.map(([name, qty]) => e('span', { key: name, className: 'bg-emerald-800 px-3 py-1 rounded-full text-[10px] font-bold border border-emerald-600' }, `${name}`)) :
+                                e('span', { className: 'text-[10px] opacity-50' }, '累積足夠數據後將顯示建議...')
+                            )
+                        ),
+                        e('div', { className: 'absolute -right-4 -top-4 w-24 h-24 bg-emerald-600/20 rounded-full blur-2xl' })
+                    ),
+                    // 歷史訂單列表
+                    e('div', { className: 'space-y-4' },
+                        history.length === 0 ? e('div', { className: 'text-center py-10 text-gray-400 italic' }, '尚無歷史紀錄') :
+                        history.map(order => e('div', { key: order.id, className: 'bg-white p-5 rounded-[2.2rem] shadow-sm border border-gray-100' },
+                            e('div', { className: 'flex justify-between items-center mb-3' },
+                                e('div', { className: 'flex items-center gap-2' },
+                                    e('span', { className: 'px-2 py-0.5 rounded-lg text-[10px] font-black ' + (order.vendorKey === 'tea' ? 'bg-emerald-100 text-emerald-700' : 'bg-orange-100 text-orange-700') }, order.vendor),
+                                    order.note && e('span', { className: 'bg-red-500 text-white px-2 py-0.5 rounded text-[10px] font-bold' }, order.note)
+                                ),
+                                e('span', { className: 'text-gray-400 text-[10px] font-medium' }, new Date(order.timestamp).toLocaleString())
+                            ),
+                            e('div', { className: 'space-y-2 mb-3 bg-gray-50/50 p-3 rounded-2xl' },
+                                order.items.map((item, idx) => e('div', { key: idx, className: 'flex justify-between text-xs' },
+                                    e('span', { className: 'text-gray-600 font-bold' }, item.name),
+                                    e('span', { className: 'text-gray-900 font-black' }, `${item.qty} ${order.vendorKey === 'tea' ? '斤' : '瓶'}`)
+                                ))
+                            ),
+                            order.details && e('div', { className: 'px-2 py-2 border-t border-dashed border-gray-100 space-y-1 text-[10px] text-gray-400 font-medium' },
+                                order.details.discount > 0 && e('div', { className: 'flex justify-between text-red-400' }, e('span', null, '大宗折扣'), e('span', null, `- NT$ ${order.details.discount}`)),
+                                order.details.tax > 0 && e('div', { className: 'flex justify-between' }, e('span', null, '營業稅 (5%)'), e('span', null, `+ NT$ ${order.details.tax}`)),
+                                order.details.shipping > 0 && e('div', { className: 'flex justify-between text-orange-400' }, e('span', null, '物流運費'), e('span', null, `+ NT$ ${order.details.shipping}`)),
+                                order.details.fee > 0 && e('div', { className: 'flex justify-between text-blue-400' }, e('span', null, '代收手續費'), e('span', null, `+ NT$ ${order.details.fee}`))
+                            ),
+                            e('div', { className: 'flex justify-between items-end mt-2' },
+                                e('span', { className: 'text-[10px] text-gray-300 font-bold' }, '應付總額'),
+                                e('div', { className: 'text-right font-black text-emerald-800 text-lg' }, `NT$ ${order.totalAmount.toLocaleString()}`)
+                            )
+                        ))
+                    ),
+                    history.length > 0 && e('button', { 
+                        onClick: () => { if(confirm('確定清除分析紀錄？')) { setHistory([]); localStorage.removeItem('chillax_order_history_v2'); } },
+                        className: 'w-full py-2 text-xs text-red-300 font-bold opacity-30'
+                    }, '重設智慧分析系統')
+                );
+            };
+
+            return e('div', { className: 'bg-slate-50 min-h-screen' },
+                toast && e('div', { className: 'fixed top-10 left-1/2 -translate-x-1/2 z-[100] bg-gray-900 text-white px-6 py-2 rounded-full text-xs font-bold shadow-2xl animate-in' }, toast),
+                
+                e('header', { className: 'bg-emerald-800 text-white pt-12 pb-24 px-8 rounded-b-[56px] shadow-lg mb-4 relative overflow-hidden' },
+                    e('div', { className: 'relative z-10' },
+                        e('div', { className: 'bg-emerald-400 text-emerald-900 text-[10px] font-black px-2 py-0.5 rounded-full inline-block mb-2' }, 'V2.0 PRO'),
+                        e('h1', { className: 'text-2xl font-black tracking-tight' }, '蕎淶清飲 Chillax'),
+                        e('p', { className: 'text-emerald-200 text-xs mt-1 font-bold' }, '智慧訂單處理系統')
+                    ),
+                    e('div', { className: 'absolute -right-10 -bottom-10 w-48 h-48 bg-emerald-700/50 rounded-full blur-3xl' })
+                ),
+
+                e('nav', { className: 'max-w-md mx-auto px-4 -mt-16 mb-8 sticky top-4 z-[50]' },
+                    e('div', { className: 'bg-white/80 backdrop-blur-xl p-1.5 rounded-[2rem] shadow-xl flex border border-white tab-shadow' },
+                        ['tea', 'juice', 'history'].map(tab => e('button', {
+                            key: tab,
+                            onClick: () => setActiveTab(tab),
+                            className: `flex-1 py-4 rounded-[1.5rem] text-xs font-black transition-all duration-300 ${activeTab === tab ? 'bg-emerald-600 text-white shadow-lg scale-105' : 'text-gray-400'}`
+                        }, tab === 'tea' ? '大武茶葉' : tab === 'juice' ? '凍果汁類' : '訂單分析'))
+                    )
+                ),
+
+                e('main', { className: 'max-w-md mx-auto px-4 pb-16 relative z-10' },
+                    activeTab === 'tea' ? renderTeaTab() : (activeTab === 'juice' ? renderJuiceTab() : renderHistoryTab())
+                )
+            );
+        }
+
+        window.onload = () => {
+            const root = ReactDOM.createRoot(document.getElementById('root'));
+            root.render(e(App));
+        };
+    </script>
+</body>
+</html>
+
